@@ -1,0 +1,53 @@
+name: Test and Merge Flask Frontend
+
+on:
+  push:
+    branches:
+      - test
+
+jobs:
+  test:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Clean old test container
+        run: docker rm -f flask-frontend-test || true
+
+      - name: Build Docker image
+        run: docker build -t flask-frontend:test .
+
+      - name: Run container and health check
+        run: |
+          docker run -d --name flask-frontend-test -p 5001:5000 flask-frontend:test
+          sleep 10
+          curl --fail http://localhost:5001 || (docker logs flask-frontend-test && exit 1)
+          docker stop flask-frontend-test
+          docker rm flask-frontend-test
+
+  promote:
+    needs: test
+    runs-on: self-hosted
+    if: success()
+
+    steps:
+      - name: Setup Git identity
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@local.test"
+
+      - name: Fetch and checkout main
+        run: |
+          git fetch origin
+          git checkout main
+
+      - name: Merge test into main
+        run: |
+          git merge origin/test --strategy-option=theirs --allow-unrelated-histories || true
+          git add .
+          git commit -m "Automated merge from test into main [CI]" || true
+
+      - name: Push to main
+        run: git push origin main
