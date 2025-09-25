@@ -1,51 +1,28 @@
-name: CI — Test (build & smoke)
+name: Test
 
 on:
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
-  build-and-smoke:
-    runs-on: self-hosted    
-    timeout-minutes: 30
-
+  test:
+    runs-on: self-hosted
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Build Docker image
-        run: |
-          docker build -t flask-frontend:${{ github.sha }} .
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
 
-      - name: Start container (detached)
+      - name: Install dependencies
         run: |
-          docker run -d --name flask-test -p 5000:5000 flask-frontend:${{ github.sha }}
+          pip install -r requirements.txt
 
-      - name: Wait for app (max 30s)
+      - name: Run tests with coverage
         run: |
-          for i in $(seq 1 30); do
-            if curl -sSf http://localhost:5000/ >/dev/null 2>&1; then
-              echo "app is up"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "app did not start in time" && exit 1
-
-      - name: Smoke test — check expected response
-        run: |
-          RESP=$(curl -s http://localhost:5000/)
-          echo "response: $RESP"
-          echo "$RESP" | grep -q "Helloo" || (echo "expected string not found" && exit 1)
-
-      - name: (Optional) Run unit tests
-        run: |
-          # If you add pytest / unit tests, run them here
-          # pytest -q
-          echo "no unit tests configured"
-
-      - name: Cleanup (always)
-        if: always()
-        run: |
-          docker rm -f flask-test || true
+          pytest --cov=app --cov-report=term-missing --cov-fail-under=80
+          # Fails if coverage < 80%
