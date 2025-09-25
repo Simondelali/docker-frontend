@@ -1,0 +1,51 @@
+name: CI — Test (build & smoke)
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-smoke:
+    runs-on: self-hosted     # <--- use ubuntu-latest if your self-hosted runner lacks docker
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t flask-frontend:${{ github.sha }} .
+
+      - name: Start container (detached)
+        run: |
+          docker run -d --name flask-test -p 5000:5000 flask-frontend:${{ github.sha }}
+
+      - name: Wait for app (max 30s)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sSf http://localhost:5000/ >/dev/null 2>&1; then
+              echo "app is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "app did not start in time" && exit 1
+
+      - name: Smoke test — check expected response
+        run: |
+          RESP=$(curl -s http://localhost:5000/)
+          echo "response: $RESP"
+          echo "$RESP" | grep -q "Helloo" || (echo "expected string not found" && exit 1)
+
+      - name: (Optional) Run unit tests
+        run: |
+          # If you add pytest / unit tests, run them here
+          # pytest -q
+          echo "no unit tests configured"
+
+      - name: Cleanup (always)
+        if: always()
+        run: |
+          docker rm -f flask-test || true
