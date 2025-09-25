@@ -3,25 +3,50 @@ name: Deploy Flask Frontend
 on:
   push:
     branches:
-      - main
+      - main            # automatic: deploy to staging by default
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Which environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
 
 jobs:
   deploy:
     runs-on: self-hosted
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Stop old container
-        run: docker rm -f flask-frontend || true
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t flask-frontend:latest .
-
-      - name: Run container
         run: |
-          docker run -d \
-            --name flask-frontend \
-            -p 5000:5000 \
-            flask-frontend:latest
+          docker build -t flask-frontend:latest .
+
+      - name: Stop and remove old container (if exists)
+        run: |
+          CONTAINER="flask-frontend-${{ github.event.inputs.environment || 'staging' }}"
+          docker rm -f "$CONTAINER" || true
+
+      - name: Start new container
+        run: |
+          CONTAINER="flask-frontend-${{ github.event.inputs.environment || 'staging' }}"
+          # adjust ports per environment; here we use 5000 -> 5000
+          docker run -d --name "$CONTAINER" -p 5000:5000 --restart=always flask-frontend:latest
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sSf http://localhost:5000/ >/dev/null 2>&1; then
+              echo "deploy succeeded"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "health check failed" && exit 1
